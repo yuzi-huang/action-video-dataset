@@ -24,7 +24,8 @@
     .search { flex: 1; min-width: 240px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 10px 16px; }
     .search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 14px; }
     .dlbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0 0 14px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-    .check { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; color: #333; }
+    .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; color: #333; }
+    .dlchecks { display: inline-flex; gap: 12px; flex-wrap: wrap; align-items: center; }
     .check input { width: 15px; height: 15px; }
     .dlmeta { color: var(--muted); font-size: 12px; }
     .progress { flex: 1; min-width: 180px; height: 8px; background: #efece4; border-radius: 99px; overflow: hidden; }
@@ -70,8 +71,7 @@
     </div>
     <div class="dlbar">
       <label class="check"><input id="dlAll" type="checkbox" checked /> 全选</label>
-      <label class="check"><input id="dlGasp" type="checkbox" checked /> GASP 官方动作</label>
-      <label class="check"><input id="dlPack" type="checkbox" checked /> 3583 动作包</label>
+      <span class="dlchecks" id="dlLibs"></span>
       <button class="primary" id="dlBtn">批量下载</button>
       <span class="dlmeta" id="dlMeta"></span>
       <div class="progress" id="dlProgress" hidden><span id="dlBar"></span></div>
@@ -177,11 +177,23 @@
       document.getElementById("modal").classList.remove("on");
     }
 
+    function libBoxes() {
+      return Array.from(document.querySelectorAll("#dlLibs .dlLib"));
+    }
+
     function selectedLibs() {
-      const ids = [];
-      if (document.getElementById("dlGasp").checked) ids.push("gasp");
-      if (document.getElementById("dlPack").checked) ids.push("pack3583");
-      return ids;
+      return libBoxes().filter(cb => cb.checked).map(cb => cb.value);
+    }
+
+    function renderDlLibs() {
+      const wrap = document.getElementById("dlLibs");
+      wrap.innerHTML = (state.data.libraries || []).map(l =>
+        `<label class="check"><input type="checkbox" class="dlLib" value="${l.id}" checked /> ${l.label}</label>`
+      ).join("");
+      libBoxes().forEach(cb => cb.addEventListener("change", () => {
+        document.getElementById("dlAll").checked = libBoxes().every(x => x.checked);
+        refreshDlMeta();
+      }));
     }
 
     function selectedDownloads() {
@@ -192,9 +204,8 @@
     function refreshDlMeta() {
       const items = selectedDownloads();
       const bytes = items.reduce((n, it) => n + (it.bytes || 0), 0);
-      const names = [];
-      if (document.getElementById("dlGasp").checked) names.push("GASP");
-      if (document.getElementById("dlPack").checked) names.push("3583");
+      const picked = new Set(selectedLibs());
+      const names = (state.data.libraries || []).filter(l => picked.has(l.id)).map(l => l.label);
       document.getElementById("dlMeta").textContent = items.length
         ? `将下载 ${names.join(" + ")} · ${items.length} 个文件 · ${fmtSize(bytes)}`
         : "请至少勾选一个库";
@@ -314,19 +325,17 @@
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
     document.getElementById("dlAll").addEventListener("change", () => {
       const on = document.getElementById("dlAll").checked;
-      document.getElementById("dlGasp").checked = on;
-      document.getElementById("dlPack").checked = on;
+      libBoxes().forEach(cb => { cb.checked = on; });
       refreshDlMeta();
-    });
-    ["dlGasp", "dlPack"].forEach(id => {
-      document.getElementById(id).addEventListener("change", () => {
-        document.getElementById("dlAll").checked = document.getElementById("dlGasp").checked && document.getElementById("dlPack").checked;
-        refreshDlMeta();
-      });
     });
     document.getElementById("dlBtn").onclick = downloadBatch;
 
-    fetch("./catalog.json", { cache: "no-store" }).then(r => r.json()).then(data => { state.data = data; draw(); refreshDlMeta(); });
+    fetch("./catalog.json", { cache: "no-store" }).then(r => r.json()).then(data => {
+      state.data = data;
+      draw();
+      renderDlLibs();
+      refreshDlMeta();
+    });
   </script>
 </body>
 </html>
