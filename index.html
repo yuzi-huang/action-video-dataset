@@ -23,6 +23,13 @@
     .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
     .search { flex: 1; min-width: 240px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 10px 16px; }
     .search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 14px; }
+    .dlbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0 0 14px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+    .check { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; color: #333; }
+    .check input { width: 15px; height: 15px; }
+    .dlmeta { color: var(--muted); font-size: 12px; }
+    .progress { flex: 1; min-width: 180px; height: 8px; background: #efece4; border-radius: 99px; overflow: hidden; }
+    .progress > span { display: block; height: 100%; width: 0; background: #1b1b1b; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
     .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
     .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 12px; cursor: pointer; color: #444; }
     .chip.on { background: #1b1b1b; color: #fff; border-color: #1b1b1b; }
@@ -61,6 +68,14 @@
     <div class="toolbar">
       <label class="search"><input id="q" placeholder="搜索文件名、类型或标签..." /></label>
     </div>
+    <div class="dlbar">
+      <label class="check"><input id="dlAll" type="checkbox" checked /> 全选</label>
+      <label class="check"><input id="dlGasp" type="checkbox" checked /> GASP 官方动作</label>
+      <label class="check"><input id="dlPack" type="checkbox" checked /> 3583 动作包</label>
+      <button class="primary" id="dlBtn">批量下载</button>
+      <span class="dlmeta" id="dlMeta"></span>
+      <div class="progress" id="dlProgress" hidden><span id="dlBar"></span></div>
+    </div>
     <div class="chips" id="libs"></div>
     <div class="chips" id="cats"></div>
     <div class="meta" id="count"></div>
@@ -83,7 +98,7 @@
     </div>
   </div>
   <script>
-    const state = { data: null, lib: "all", cat: "all", q: "" };
+    const state = { data: null, lib: "all", cat: "all", q: "", downloading: false };
 
     const asset = (p) => (p || "").startsWith("/") ? ("." + p) : p;
     const fmtSize = (n) => n > 1048576 ? (n/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n/1024)) + " KB";
@@ -162,12 +177,156 @@
       document.getElementById("modal").classList.remove("on");
     }
 
+    function selectedLibs() {
+      const ids = [];
+      if (document.getElementById("dlGasp").checked) ids.push("gasp");
+      if (document.getElementById("dlPack").checked) ids.push("pack3583");
+      return ids;
+    }
+
+    function selectedDownloads() {
+      const libs = new Set(selectedLibs());
+      return (state.data?.items || []).filter(it => libs.has(it.library));
+    }
+
+    function refreshDlMeta() {
+      const items = selectedDownloads();
+      const bytes = items.reduce((n, it) => n + (it.bytes || 0), 0);
+      const names = [];
+      if (document.getElementById("dlGasp").checked) names.push("GASP");
+      if (document.getElementById("dlPack").checked) names.push("3583");
+      document.getElementById("dlMeta").textContent = items.length
+        ? `将下载 ${names.join(" + ")} · ${items.length} 个文件 · ${fmtSize(bytes)}`
+        : "请至少勾选一个库";
+      document.getElementById("dlBtn").disabled = state.downloading || !items.length;
+    }
+
+    function setProgress(done, total, label) {
+      const wrap = document.getElementById("dlProgress");
+      const bar = document.getElementById("dlBar");
+      wrap.hidden = total <= 0;
+      bar.style.width = (total ? Math.round(done / total * 100) : 0) + "%";
+      document.getElementById("dlMeta").textContent = label || `正在下载 ${done} / ${total}`;
+    }
+
+    async function loadJSZip() {
+      if (window.JSZip) return window.JSZip;
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "./vendor/jszip.min.js";
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+      return window.JSZip;
+    }
+
+    async function fetchBin(it) {
+      const res = await fetch(asset(it.video));
+      if (!res.ok) throw new Error(it.file + " " + res.status);
+      return new Uint8Array(await res.arrayBuffer());
+    }
+
+    async function downloadToFolder(items) {
+      const root = await window.showDirectoryPicker({ mode: "readwrite" });
+      const dirs = {};
+      const fail = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        setProgress(i, items.length, `正在保存 ${i + 1} / ${items.length} · ${it.file}`);
+        try {
+          if (!dirs[it.library]) dirs[it.library] = await root.getDirectoryHandle(it.library, { create: true });
+          const data = await fetchBin(it);
+          const fh = await dirs[it.library].getFileHandle(it.file, { create: true });
+          const w = await fh.createWritable();
+          await w.write(data);
+          await w.close();
+        } catch (err) {
+          fail.push(it.file);
+          console.warn(err);
+        }
+      }
+      return fail;
+    }
+
+    async function downloadAsZip(items) {
+      const JSZip = await loadJSZip();
+      const zip = new JSZip();
+      const fail = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        setProgress(i, items.length, `正在打包 ${i + 1} / ${items.length} · ${it.file}`);
+        try {
+          zip.file(it.library + "/" + it.file, await fetchBin(it), { compression: "STORE" });
+        } catch (err) {
+          fail.push(it.file);
+          console.warn(err);
+        }
+      }
+      setProgress(items.length, items.length, "正在生成压缩包...");
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+      const libs = selectedLibs().join("-") || "videos";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "action-videos-" + libs + ".zip";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      return fail;
+    }
+
+    async function downloadBatch() {
+      const items = selectedDownloads();
+      if (!items.length || state.downloading) return;
+      state.downloading = true;
+      refreshDlMeta();
+      document.getElementById("dlBtn").textContent = "下载中...";
+      try {
+        const fail = window.showDirectoryPicker
+          ? await downloadToFolder(items)
+          : await downloadAsZip(items);
+        setProgress(items.length, items.length, fail.length
+          ? `完成 ${items.length - fail.length} / ${items.length}，失败 ${fail.length}`
+          : `已完成 ${items.length} 个文件`);
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          refreshDlMeta();
+        } else {
+          try {
+            const fail = await downloadAsZip(items);
+            setProgress(items.length, items.length, fail.length
+              ? `完成 ${items.length - fail.length} / ${items.length}，失败 ${fail.length}`
+              : `已完成 ${items.length} 个文件`);
+          } catch (err2) {
+            document.getElementById("dlMeta").textContent = "下载失败，请重试或改用 Chrome / Edge";
+            console.warn(err, err2);
+          }
+        }
+      } finally {
+        state.downloading = false;
+        document.getElementById("dlBtn").textContent = "批量下载";
+        document.getElementById("dlBtn").disabled = !selectedDownloads().length;
+      }
+    }
+
     document.getElementById("mClose").onclick = closeModal;
     document.getElementById("modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
     document.getElementById("q").addEventListener("input", e => { state.q = e.target.value; draw(); });
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+    document.getElementById("dlAll").addEventListener("change", () => {
+      const on = document.getElementById("dlAll").checked;
+      document.getElementById("dlGasp").checked = on;
+      document.getElementById("dlPack").checked = on;
+      refreshDlMeta();
+    });
+    ["dlGasp", "dlPack"].forEach(id => {
+      document.getElementById(id).addEventListener("change", () => {
+        document.getElementById("dlAll").checked = document.getElementById("dlGasp").checked && document.getElementById("dlPack").checked;
+        refreshDlMeta();
+      });
+    });
+    document.getElementById("dlBtn").onclick = downloadBatch;
 
-    fetch("./catalog.json", { cache: "no-store" }).then(r => r.json()).then(data => { state.data = data; draw(); });
+    fetch("./catalog.json", { cache: "no-store" }).then(r => r.json()).then(data => { state.data = data; draw(); refreshDlMeta(); });
   </script>
 </body>
 </html>
