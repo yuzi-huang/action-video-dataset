@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>动作视频参考 · video dataset</title>
+  <style>
+    :root {
+      --bg: #f6f5f2;
+      --panel: #fff;
+      --line: #eceae4;
+      --text: #1b1b1b;
+      --muted: #8a867c;
+      --accent: #c45c26;
+      --chip: #f1efe8;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 28px 28px 80px; }
+    .kicker { color: var(--muted); letter-spacing: .14em; font-size: 11px; text-transform: uppercase; }
+    h1 { margin: 8px 0 6px; font-size: 28px; font-weight: 650; }
+    .sub { color: var(--muted); margin-bottom: 22px; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+    .search { flex: 1; min-width: 240px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 10px 16px; }
+    .search input { width: 100%; border: 0; outline: 0; background: transparent; font-size: 14px; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 12px; cursor: pointer; color: #444; }
+    .chip.on { background: #1b1b1b; color: #fff; border-color: #1b1b1b; }
+    .meta { color: var(--muted); margin: 8px 0 18px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(188px, 1fr)); gap: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.08); }
+    .thumb { aspect-ratio: 16/10; background: #111; position: relative; overflow: hidden; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    .play::after { content: ""; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+    .play::before { content: ""; position: absolute; width: 0; height: 0; border-left: 14px solid #fff; border-top: 9px solid transparent; border-bottom: 9px solid transparent; margin-left: 3px; z-index: 1; }
+    .badge { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.72); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+    .info { padding: 10px 10px 12px; }
+    .name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .modal { position: fixed; inset: 0; background: rgba(20,18,14,.55); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 20; }
+    .modal.on { display: flex; }
+    .sheet { width: min(980px, 100%); background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.28); }
+    .sheet-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .sheet-head h2 { margin: 0; font-size: 16px; }
+    .path { color: var(--muted); font-size: 12px; margin-top: 4px; word-break: break-all; }
+    .actions { display: flex; gap: 8px; }
+    button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+    button.primary { background: #1b1b1b; color: #fff; border-color: #1b1b1b; }
+    .player { background: #0f0f0f; }
+    .player video { width: 100%; max-height: 72vh; display: block; background: #000; }
+    .empty { padding: 80px 0; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="kicker">Collection</div>
+    <h1>动作视频参考 · video dataset</h1>
+    <div class="sub">GASP 官方库与 3583 动作包，按库和动作类型浏览。点击缩略图全屏播放。</div>
+    <div class="toolbar">
+      <label class="search"><input id="q" placeholder="搜索文件名、类型或标签..." /></label>
+    </div>
+    <div class="chips" id="libs"></div>
+    <div class="chips" id="cats"></div>
+    <div class="meta" id="count"></div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" hidden>没有匹配的视频</div>
+  </div>
+  <div class="modal" id="modal">
+    <div class="sheet">
+      <div class="sheet-head">
+        <div>
+          <h2 id="mTitle"></h2>
+          <div class="path" id="mPath"></div>
+        </div>
+        <div class="actions">
+          <a id="mDownload" download><button class="primary">下载文件</button></a>
+          <button id="mClose">关闭</button>
+        </div>
+      </div>
+      <div class="player"><video id="mVideo" controls playsinline></video></div>
+    </div>
+  </div>
+  <script>
+    const state = { data: null, lib: "all", cat: "all", q: "" };
+
+    const asset = (p) => (p || "").startsWith("/") ? ("." + p) : p;
+    const fmtSize = (n) => n > 1048576 ? (n/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n/1024)) + " KB";
+    const fmtDur = (s) => {
+      s = Math.round(s || 0);
+      return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0");
+    };
+
+    function filtered() {
+      const q = state.q.trim().toLowerCase();
+      return state.data.items.filter(it => {
+        if (state.lib !== "all" && it.library !== state.lib) return false;
+        if (state.cat !== "all" && it.category !== state.cat) return false;
+        if (!q) return true;
+        return (it.title + it.file + it.categoryLabel + it.subLabel + it.libraryLabel).toLowerCase().includes(q);
+      });
+    }
+
+    function renderChips() {
+      const libs = document.getElementById("libs");
+      const cats = document.getElementById("cats");
+      const libOpts = [{id:"all", label:"全部库"}].concat(state.data.libraries);
+      libs.innerHTML = libOpts.map(l => `<button class="chip ${state.lib===l.id?"on":""}" data-lib="${l.id}">${l.label}</button>`).join("");
+      const used = {};
+      state.data.items.forEach(it => {
+        if (state.lib !== "all" && it.library !== state.lib) return;
+        used[it.category] = it.categoryLabel;
+      });
+      const catOpts = [["all","全部类型"]].concat(Object.entries(used).sort((a,b)=>a[1].localeCompare(b[1],"zh")));
+      cats.innerHTML = catOpts.map(([id,label]) => `<button class="chip ${state.cat===id?"on":""}" data-cat="${id}">${label}</button>`).join("");
+      libs.querySelectorAll("button").forEach(b => b.onclick = () => { state.lib = b.dataset.lib; state.cat = "all"; draw(); });
+      cats.querySelectorAll("button").forEach(b => b.onclick = () => { state.cat = b.dataset.cat; draw(); });
+    }
+
+    function draw() {
+      renderChips();
+      const items = filtered();
+      document.getElementById("count").textContent = `共 ${items.length} 条`;
+      const grid = document.getElementById("grid");
+      const empty = document.getElementById("empty");
+      empty.hidden = items.length > 0;
+      grid.innerHTML = items.map(it => `
+        <article class="card" data-id="${it.id}">
+          <div class="thumb">
+            <img loading="lazy" src="${asset(it.thumb)}" alt="${it.title}" />
+            <span class="play"></span>
+            <span class="badge">视频</span>
+          </div>
+          <div class="info">
+            <div class="name" title="${it.file}">${it.title}</div>
+            <div class="row"><span>${it.libraryLabel} · ${it.subLabel}</span><span>${fmtDur(it.duration)} · ${fmtSize(it.bytes)}</span></div>
+          </div>
+        </article>`).join("");
+      grid.querySelectorAll(".card").forEach(card => card.onclick = () => openItem(card.dataset.id));
+    }
+
+    function openItem(id) {
+      const it = state.data.items.find(x => x.id === id);
+      if (!it) return;
+      document.getElementById("mTitle").textContent = it.file;
+      document.getElementById("mPath").textContent = `${it.libraryLabel} / ${it.categoryLabel} / ${it.subLabel}`;
+      const a = document.getElementById("mDownload");
+      a.href = asset(it.video);
+      a.download = it.file;
+      const v = document.getElementById("mVideo");
+      v.src = asset(it.video);
+      document.getElementById("modal").classList.add("on");
+      v.play().catch(() => {});
+    }
+
+    function closeModal() {
+      const v = document.getElementById("mVideo");
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+      document.getElementById("modal").classList.remove("on");
+    }
+
+    document.getElementById("mClose").onclick = closeModal;
+    document.getElementById("modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
+    document.getElementById("q").addEventListener("input", e => { state.q = e.target.value; draw(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+    fetch("./catalog.json").then(r => r.json()).then(data => { state.data = data; draw(); });
+  </script>
+</body>
+</html>
