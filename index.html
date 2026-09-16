@@ -167,7 +167,7 @@
     document.getElementById("q").addEventListener("input", e => { state.q = e.target.value; draw(); });
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
-    fetch("./catalog.json").then(r => r.json()).then(data => { state.data = data; draw(); });
+    fetch("./catalog.json", { cache: "no-store" }).then(r => r.json()).then(data => { state.data = data; draw(); });
   </script>
 </body>
 </html>
