@@ -31,6 +31,11 @@
     .progress { flex: 1; min-width: 180px; height: 8px; background: #efece4; border-radius: 99px; overflow: hidden; }
     .progress > span { display: block; height: 100%; width: 0; background: #1b1b1b; }
     button:disabled { opacity: .45; cursor: not-allowed; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+    .tab { border: 0; background: transparent; padding: 10px 16px; cursor: pointer; color: var(--muted); font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab:hover { color: var(--text); }
+    .tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+    .tab .n { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 12px; }
     .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
     .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 12px; cursor: pointer; color: #444; }
     .chip.on { background: #1b1b1b; color: #fff; border-color: #1b1b1b; }
@@ -66,6 +71,7 @@
     <div class="kicker">Collection</div>
     <h1>动作视频参考 · video dataset</h1>
     <div class="sub">GASP 官方库与 3583 动作包，按库和动作类型浏览。仅保留时长大于 3 秒且有明显动作的片段。点击缩略图全屏播放。</div>
+    <div class="tabs" id="tabs"></div>
     <div class="toolbar">
       <label class="search"><input id="q" placeholder="搜索文件名、类型或标签..." /></label>
     </div>
@@ -98,7 +104,7 @@
     </div>
   </div>
   <script>
-    const state = { data: null, lib: "all", cat: "all", q: "", downloading: false };
+    const state = { data: null, tab: "all", lib: "all", cat: "all", q: "", downloading: false };
 
     const asset = (p) => (p || "").startsWith("/") ? ("." + p) : p;
     const fmtSize = (n) => n > 1048576 ? (n/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n/1024)) + " KB";
@@ -107,9 +113,14 @@
       return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0");
     };
 
+    function inTab(it) {
+      return state.tab === "all" || it.batch === state.tab;
+    }
+
     function filtered() {
       const q = state.q.trim().toLowerCase();
       return state.data.items.filter(it => {
+        if (!inTab(it)) return false;
         if (state.lib !== "all" && it.library !== state.lib) return false;
         if (state.cat !== "all" && it.category !== state.cat) return false;
         if (!q) return true;
@@ -117,13 +128,33 @@
       });
     }
 
+    function renderTabs() {
+      const wrap = document.getElementById("tabs");
+      const batches = state.data.batches || [];
+      if (batches.length < 2) { wrap.hidden = true; return; }
+      const count = id => state.data.items.filter(it => id === "all" || it.batch === id).length;
+      const opts = [{ id: "all", label: "全部" }].concat(batches);
+      wrap.innerHTML = opts.map(t =>
+        `<button class="tab ${state.tab === t.id ? "on" : ""}" data-tab="${t.id}">${t.label}<span class="n">${count(t.id)}</span></button>`
+      ).join("");
+      wrap.querySelectorAll("button").forEach(b => b.onclick = () => {
+        state.tab = b.dataset.tab;
+        state.lib = "all";
+        state.cat = "all";
+        draw();
+        refreshDlMeta();
+      });
+    }
+
     function renderChips() {
       const libs = document.getElementById("libs");
       const cats = document.getElementById("cats");
-      const libOpts = [{id:"all", label:"全部库"}].concat(state.data.libraries);
+      const usedLibs = new Set(state.data.items.filter(inTab).map(it => it.library));
+      const libOpts = [{id:"all", label:"全部库"}].concat(state.data.libraries.filter(l => usedLibs.has(l.id)));
       libs.innerHTML = libOpts.map(l => `<button class="chip ${state.lib===l.id?"on":""}" data-lib="${l.id}">${l.label}</button>`).join("");
       const used = {};
       state.data.items.forEach(it => {
+        if (!inTab(it)) return;
         if (state.lib !== "all" && it.library !== state.lib) return;
         used[it.category] = it.categoryLabel;
       });
@@ -134,6 +165,7 @@
     }
 
     function draw() {
+      renderTabs();
       renderChips();
       const items = filtered();
       document.getElementById("count").textContent = `共 ${items.length} 条`;
@@ -198,7 +230,7 @@
 
     function selectedDownloads() {
       const libs = new Set(selectedLibs());
-      return (state.data?.items || []).filter(it => libs.has(it.library));
+      return (state.data?.items || []).filter(it => inTab(it) && libs.has(it.library));
     }
 
     function refreshDlMeta() {
@@ -206,9 +238,12 @@
       const bytes = items.reduce((n, it) => n + (it.bytes || 0), 0);
       const picked = new Set(selectedLibs());
       const names = (state.data.libraries || []).filter(l => picked.has(l.id)).map(l => l.label);
+      const tabName = state.tab === "all"
+        ? ""
+        : ((state.data.batches || []).find(b => b.id === state.tab)?.label || state.tab) + " · ";
       document.getElementById("dlMeta").textContent = items.length
-        ? `将下载 ${names.join(" + ")} · ${items.length} 个文件 · ${fmtSize(bytes)}`
-        : "请至少勾选一个库";
+        ? `将下载 ${tabName}${names.join(" + ")} · ${items.length} 个文件 · ${fmtSize(bytes)}`
+        : "当前筛选下没有可下载的文件";
       document.getElementById("dlBtn").disabled = state.downloading || !items.length;
     }
 
@@ -277,9 +312,10 @@
       setProgress(items.length, items.length, "正在生成压缩包...");
       const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
       const libs = selectedLibs().join("-") || "videos";
+      const tag = state.tab === "all" ? "" : state.tab + "-";
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = "action-videos-" + libs + ".zip";
+      a.download = "action-videos-" + tag + libs + ".zip";
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       return fail;
